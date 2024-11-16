@@ -4,7 +4,7 @@ from collections import defaultdict
 
 def load_metadata(metadata_file_path):
     """
-    Load the metadata from a JSONL file and return it as a pandas DataFrame.
+    Load metadata from a JSONL file and return it as a pandas DataFrame.
     """
     metadata = []
     with open(metadata_file_path, 'r') as file:
@@ -28,7 +28,7 @@ def load_metadata(metadata_file_path):
 
 def load_reviews(review_file_path):
     """
-    Load the individual reviews from a JSONL file and return it as a pandas DataFrame.
+    Load individual reviews from a JSONL file and return it as a pandas DataFrame.
     """
     reviews = []
     with open(review_file_path, 'r') as file:
@@ -57,48 +57,38 @@ def load_reviews(review_file_path):
 
 def get_top_reviewed_products(metadata_df, top_n=100):
     """
-    Get the top N products with the highest number of reviews from the metadata.
+    Get the top N products with the highest number of reviews from metadata.
     """
-    # Sort by rating_number in descending order and select the top N products
     top_products_df = metadata_df.sort_values(by='rating_number', ascending=False).head(top_n)
     return top_products_df['asin'].tolist()
 
 def fetch_reviews_for_top_products(review_df, top_asins, reviews_per_rating=5):
     """
-    Fetch a specified number of reviews per star rating for the top reviewed products.
+    Fetch reviews grouped by ASIN and rating, and return them in a nested JSON format.
     """
     product_reviews = defaultdict(lambda: defaultdict(list))
 
-    # Group reviews by product and star rating for only the top ASINs
+    # Group reviews by product and star rating for the top ASINs
     for _, review in review_df.iterrows():
         asin = review['asin']
         if asin in top_asins:
-            rating = int(review['rating'])
-            product_reviews[asin][rating].append(review)
+            rating = str(int(review['rating']))
+            product_reviews[asin][rating].append({
+                "title": review['title'],
+                "text": review['text']
+            })
 
-    # Filter and fetch reviews based on requirements
-    filtered_reviews = []
-    for asin in top_asins:
-        ratings_dict = product_reviews.get(asin, {})
-        for star_rating in range(5, 0, -1):
-            reviews = ratings_dict.get(star_rating, [])
-            
-            # Sort reviews by helpful votes and verified status
-            sorted_reviews = sorted(reviews, key=lambda x: (x['helpful_vote'], x['verified_purchase']), reverse=True)
-            
+    # Fetch up to 5 reviews per rating for each product
+    nested_reviews = {}
+    for asin, ratings_dict in product_reviews.items():
+        nested_reviews[asin] = {}
+        for star_rating, reviews in ratings_dict.items():
+            # Sort by helpful votes and verified status
+            sorted_reviews = sorted(reviews, key=lambda x: (x.get('helpful_vote', 0), x.get('verified_purchase', False)), reverse=True)
             # Fetch the top 'reviews_per_rating' reviews for each star rating
-            selected_reviews = sorted_reviews[:reviews_per_rating]
-            for review in selected_reviews:
-                filtered_reviews.append({
-                    'asin': asin,
-                    'rating': star_rating,
-                    'title': review['title'],
-                    'text': review['text'],
-                    'helpful_vote': review['helpful_vote'],
-                    'verified_purchase': review['verified_purchase']
-                })
-
-    return pd.DataFrame(filtered_reviews)
+            nested_reviews[asin][star_rating] = sorted_reviews[:reviews_per_rating]
+    
+    return nested_reviews
 
 def main(metadata_file, review_file):
     # Load the datasets
@@ -115,20 +105,18 @@ def main(metadata_file, review_file):
     top_asins = get_top_reviewed_products(metadata_df, top_n=100)
     print(f"Selected {len(top_asins)} top products.")
     
-    # Fetch reviews for these top products
+    # Fetch reviews for these top products and convert to nested JSON
     print("Fetching reviews for top products...")
-    filtered_reviews_df = fetch_reviews_for_top_products(review_df, top_asins, reviews_per_rating=5)
+    nested_reviews = fetch_reviews_for_top_products(review_df, top_asins, reviews_per_rating=5)
     
-    # Save the filtered reviews to a CSV file
-    output_file = 'top_products_reviews.csv'
-    filtered_reviews_df.to_csv(output_file, index=False)
-    print(f"Filtered reviews saved to {output_file}.")
-    
-    # Display the first few rows of the filtered reviews
-    print(filtered_reviews_df.head(10))
+    # Save the nested JSON to a file
+    output_file = 'top_products_reviews.json'
+    with open(output_file, 'w') as json_file:
+        json.dump(nested_reviews, json_file, indent=4)
+    print(f"Nested reviews saved to {output_file}.")
 
 if __name__ == "__main__":
     # Replace these with the paths to your full datasets
-    metadata_file = 'meta_CDs_and_Vinyl.jsonl' # Can replace with other datasets
-    review_file = 'CDs_and_Vinyl.jsonl' # Same for this
+    metadata_file = 'meta_CDs_and_Vinyl.jsonl'
+    review_file = 'CDs_and_Vinyl.jsonl'
     main(metadata_file, review_file)
