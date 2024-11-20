@@ -3,10 +3,11 @@ import pandas as pd
 import re
 from tqdm import tqdm
 from transformers import LlamaTokenizer
+import tiktoken
 import os
 
 AUTH_TOKEN = os.getenv("HF_TOKEN")
-MAX_REVIEW_LENGTH = 1000
+MAX_REVIEW_LENGTH = 512
 
 def clean_text(text):
     """
@@ -59,15 +60,14 @@ def process_json_to_string(data):
 
 
 if __name__ == "__main__":
-    tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat", token=AUTH_TOKEN)
-
-    file_folder = "./data/selected/"
+    llama_tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat", token=AUTH_TOKEN)
+    gpt_tokenizer = tiktoken.encoding_for_model("gpt-4o")
+    file_folder = "../data/selected/"
     file_names = ["Amazon_Fashion", "Appliances", "Electronics", "Handmade_Products", "Health_and_Household"]  # Add your file names here
     processed_data = []
 
-    max_length_review = -1
-    max_review = None
-    total_token_count, total_entry_count = 0, 0
+    max_gpt_tokens, max_llama_tokens = -1, -1
+    total_gpt_count, total_entry_count = 0, 0
     for file_name in file_names:
         print(f"Processing {file_name}")
         with open(f"{file_folder}{file_name}.json", 'r') as file:
@@ -75,27 +75,26 @@ if __name__ == "__main__":
             for asin, asin_data in tqdm(json_data.items()):
                 processed_string = process_json_to_string(asin_data)
 
-                tokens = tokenizer.tokenize(processed_string)
-                num_tokens = len(tokens)
+                llama_tokens = llama_tokenizer.tokenize(processed_string)
+                gpt_tokens = gpt_tokenizer.encode(processed_string)
                 
-                if num_tokens > max_length_review:
-                    max_length_review = num_tokens
-                    max_review = processed_string
-                total_token_count += num_tokens
+                max_llama_tokens = max(max_llama_tokens, len(llama_tokens))
+                max_gpt_tokens = max(max_gpt_tokens, len(gpt_tokens))
+                total_gpt_count += len(gpt_tokens)
                 total_entry_count += 1
 
                 processed_data.append({'ASIN': asin, 'Reviews': processed_string})
 
     print(f"Obtained dataset of {len(processed_data)} Amazon items")
-    print(f"Longest entry is {max_length_review} tokens long:\n{max_review}")
-    print(f"Average tokens: {total_token_count / total_entry_count}")
+    print(f"Max GPT Tokens: {max_gpt_tokens}\nMax llama tokens: {max_llama_tokens}")
+    print(f"Total GPT tokens: {total_gpt_count}\nTotal number of entries: {total_entry_count}")
     
     # Create a DataFrame from the processed data
     df = pd.DataFrame(processed_data)
     print(f"Total processed items: {df.shape}")
 
     # Save the DataFrame as a TSV file
-    output_file = './data/processed/amazon_reviews.tsv'
+    output_file = '../data/processed/amazon_reviews.tsv'
     df.to_csv(output_file, sep='\t', index=False)
 
     print(f"Data successfully processed and saved to {output_file}.")

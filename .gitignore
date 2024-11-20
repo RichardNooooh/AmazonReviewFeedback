@@ -1,4 +1,4 @@
 .env
 data/
 logs/
-batch_temp/
+__pycache__/

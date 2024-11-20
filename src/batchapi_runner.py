@@ -6,7 +6,6 @@ from copy import deepcopy
 import time
 import pandas as pd
 from tqdm import tqdm
-from dotenv import load_dotenv
 
 
 class OpenAIBatchRunner:
@@ -15,9 +14,9 @@ class OpenAIBatchRunner:
         openai_api_key: str,
         system_prompt: str,
         input_file: str,
-        batch_input_folder: str = "./batch_temp/batch_input/",
-        batch_output_folder: str = "./batch_temp/batch_output/",
-        id_folder: str = "./batch_temp/ids/",
+        batch_input_folder: str = "../data/batch_temp/batch_input/",
+        batch_output_folder: str = "../data/batch_temp/batch_output/",
+        id_folder: str = "../data/batch_temp/ids/",
     ):
         self.client = OpenAI(api_key=openai_api_key)
         self.input_file = input_file
@@ -49,7 +48,7 @@ class OpenAIBatchRunner:
             "content": system_prompt,
         }
 
-    def create_jsonl_batches(self, batch_size: int = 1000):
+    def create_jsonl_batches(self, batch_size: int = 500):
         """
         Create JSONL batch files.
 
@@ -58,6 +57,8 @@ class OpenAIBatchRunner:
         """
         self.log.info("Creating JSONL batch files")
         df = pd.read_csv(self.input_file, delimiter="\t")
+        df = df.sample(frac=1, random_state=42).reset_index(drop=True) # makes batches ~the same size
+
         num_batches = df.shape[0] // batch_size + (
             1 if df.shape[0] % batch_size != 0 else 0
         )
@@ -117,12 +118,74 @@ class OpenAIBatchRunner:
         self.log.info("Finished writing OpenAI file IDs locally")
 
 
+    # def submit_batch_jobs(self):
+    #     """
+    #     Submits a single batch job at a time based on file IDs recorded in `self.id_folder`/fileids.txt.
+    #     Waits for the status to complete before moving to the next job.
+    #     """
+    #     self.log.info("Submitting batch jobs one at a time...")
+    #     file_ids = []
+    #     with open(f"{self.id_folder}fileids.txt", mode="r") as f:
+    #         for data in f:
+    #             file_entry = data.split("\t")
+    #             file_ids.append((file_entry[0], file_entry[1].strip()))
+
+    #     self.log.info(f"Retrieved {len(file_ids)} file ids from local file")
+
+    #     FAILED_STATUS = ["failed", "expired", "cancelled"]
+    #     for file_id, file_name in file_ids:
+    #         # Submit the batch job
+    #         batch_job = self.client.batches.create(
+    #             input_file_id=file_id,
+    #             endpoint="/v1/chat/completions",
+    #             completion_window="24h",
+    #         )
+    #         batch_id = batch_job.id
+    #         self.log.info(f"Submitted job for file {file_name} with ID: {batch_id}")
+
+    #         # Wait for the job to complete or fail
+    #         while True:
+    #             job = self.client.batches.retrieve(batch_id)
+    #             if job.status in FAILED_STATUS:
+    #                 self.log.warning(
+    #                     f'    Batch with file {file_name} and ID "{batch_id}" has failed with status {job.status}'
+    #                 )
+    #                 self.log.info("    Now sleeping for 10 minutes to ensure that OpenAI's enqueued token count is reset correctly...")
+    #                 time.sleep(60*5)
+    #                 break
+    #             elif job.status == "completed":
+    #                 self.log.info(
+    #                     f"    Batch for file {file_name} completed! Downloading data..."
+    #                 )
+    #                 # Download the results
+    #                 result_file = self.client.files.content(job.output_file_id).content
+
+    #                 with open(f"{self.id_folder}output_fileids.txt", mode="a") as f:
+    #                     f.write(f"{job.output_file_id}\t{file_name}\n")
+
+    #                 with open(
+    #                     f"{self.batch_output_folder}output_{file_name}", mode="wb"
+    #                 ) as f:
+    #                     f.write(result_file)
+
+    #                 self.log.info(f"    Downloaded results for file {file_name}")
+    #                 self.log.info("    Now sleeping for 5 minutes to ensure that OpenAI's enqueued token count is reset correctly...")
+    #                 time.sleep(60*5)
+    #                 break
+
+    #             self.log.info(
+    #                 f"    Batch job {batch_id} for file {file_name} still in progress. Retrying in 5 minutes..."
+    #             )
+    #             time.sleep(60*5)
+
+    #     self.log.info("Finished submitting and processing all batch jobs.")
+
     def submit_batch_jobs(self):
         """
-        Submits a single batch job at a time based on file IDs recorded in `self.id_folder`/fileids.txt.
-        Waits for the status to complete before moving to the next job.
+        Submits batch jobs based on file IDs recorded in `self.id_folder`/fileids.txt.
+        Records batch IDs locally in `self.id_folder/batchids.txt`
         """
-        self.log.info("Submitting batch jobs one at a time...")
+        self.log.info("Submitting batch jobs...")
         file_ids = []
         with open(f"{self.id_folder}fileids.txt", mode="r") as f:
             for data in f:
@@ -130,31 +193,59 @@ class OpenAIBatchRunner:
                 file_ids.append((file_entry[0], file_entry[1].strip()))
 
         self.log.info(f"Retrieved {len(file_ids)} file ids from local file")
-
-        FAILED_STATUS = ["failed", "expired", "cancelled"]
+        batch_ids = []
         for file_id, file_name in file_ids:
-            # Submit the batch job
             batch_job = self.client.batches.create(
                 input_file_id=file_id,
                 endpoint="/v1/chat/completions",
                 completion_window="24h",
             )
-            batch_id = batch_job.id
-            self.log.info(f"Submitted job for file {file_name} with ID: {batch_id}")
+            batch_ids.append((batch_job.id, file_name))
+            self.log.info(f"Submitted job for file {file_name} with ID: {batch_job.id}")
+            time.sleep(1)
 
-            # Wait for the job to complete or fail
-            while True:
+        self.log.info(f"Finished submitting {len(batch_ids)} jobs")
+
+        with open(f"{self.id_folder}batchids.txt", mode="w") as f:
+            for batch_id, file_name in batch_ids:
+                f.write(f"{batch_id}\t{file_name}\n")
+        self.log.info("Finished writing OpenAI file IDs locally")
+
+    def check_status_and_download(self):
+        """
+        Read in the batch IDs from local file.
+        Periodically checks for the batch job status.
+        Downloads the resulting JSONL when complete.
+        """
+        self.log.info("Checking status for batch jobs...")
+        batch_ids = []
+        with open(f"{self.id_folder}batchids.txt", mode="r") as f:
+            for data in f:
+                file_entry = data.split("\t")
+                batch_ids.append((file_entry[0], file_entry[1].strip()))
+
+        self.log.info(f"Retrieved {len(batch_ids)} batch IDs from local storage")
+
+        # clear out the output_fileids.txt file
+        with open(f"{self.id_folder}output_fileids.txt", mode="w") as f:
+            f.write("")
+
+        FAILED_STATUS = ["failed", "expired", "cancelled"]
+        failed_batches = []
+        while len(batch_ids) > 0:
+            batch_indices_to_remove = []
+            # go through the status of each batch job
+            for i, (batch_id, file_name) in enumerate(batch_ids):
                 job = self.client.batches.retrieve(batch_id)
                 if job.status in FAILED_STATUS:
                     self.log.warning(
                         f'Batch with file {file_name} and ID "{batch_id}" has failed with status {job.status}'
                     )
-                    break
+                    failed_batches.append((batch_id, file_name))
                 elif job.status == "completed":
                     self.log.info(
                         f"Batch for file {file_name} completed! Downloading data..."
                     )
-                    # Download the results
                     result_file = self.client.files.content(job.output_file_id).content
 
                     with open(f"{self.id_folder}output_fileids.txt", mode="a") as f:
@@ -165,15 +256,24 @@ class OpenAIBatchRunner:
                     ) as f:
                         f.write(result_file)
 
-                    self.log.info(f"Downloaded results for file {file_name}")
-                    break
+                    batch_indices_to_remove.append(i)
 
-                self.log.info(
-                    f"Batch job {batch_id} for file {file_name} still in progress. Retrying in 1 minute..."
-                )
-                time.sleep(60)
+                time.sleep(1)
 
-        self.log.info("Finished submitting and processing all batch jobs.")
+            # remove batches from check list
+            if len(batch_indices_to_remove) > 0:
+                batch_ids = [
+                    batch_id
+                    for i, batch_id in enumerate(batch_ids)
+                    if i not in batch_indices_to_remove
+                ]
+
+            if len(batch_ids) > 0:
+                self.log.info("Sleeping for 5 minutes...")
+                time.sleep(60.0 * 5.0)
+
+        self.log.info("Finished retrieving data!")
+
 
     def delete_data_files(self):
         """
@@ -202,40 +302,3 @@ class OpenAIBatchRunner:
             time.sleep(2)
 
         self.log.info("Finished deleting files in OpenAI storage")
-
-
-if __name__ == "__main__":
-    fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
-
-    if not os.path.exists("./logs/"):
-        os.makedirs("./logs/")
-
-    file_handler = logging.FileHandler("./logs/batchrunner.log", mode="w")
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(fmt)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(fmt)
-
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
-    load_dotenv("./.env")
-
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    system_prompt = (
-        "You are a helpful assistant for a business. "
-        + "You are given a set of Amazon reviews for a given item, grouped by their ratings out of 5, "
-        + "and tasked with providing actionable feedback to help improve this item. "
-        + "Please format your response into concise sentences, one for each actionable feedback. "
-        + "Place each feedback on a bulletpoint."
-    )
-    input_file = "./data/processed/amazon_reviews.tsv"
-    runner = OpenAIBatchRunner(OPENAI_API_KEY, system_prompt, input_file)
-    runner.create_jsonl_batches()
-    runner.upload_batch_files()
-    runner.submit_batch_jobs()
-    runner.delete_data_files()
