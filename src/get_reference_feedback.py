@@ -3,6 +3,8 @@ from batchapi_runner import OpenAIBatchRunner
 import logging
 import os
 from dotenv import load_dotenv
+import pandas as pd
+from sklearn.model_selection import train_test_split
 
 
 if __name__ == "__main__":
@@ -36,9 +38,20 @@ if __name__ == "__main__":
     )
     input_file = "../data/processed/amazon_reviews.tsv"
     runner = OpenAIBatchRunner(OPENAI_API_KEY, system_prompt, input_file)
-    # runner.create_jsonl_batches()
-    # runner.upload_batch_files()
-    # runner.submit_batch_jobs()
+    runner.create_jsonl_batches()
+    runner.upload_batch_files()
+    runner.submit_batch_jobs()
     runner.check_status_and_download()
-    # runner.delete_data_files()
+    runner.delete_data_files()
+    output_data = runner.get_data()
+
+    df = pd.read_csv(input_file, delimiter="\t")
+    df['Reference'] = df['ASIN'].map(output_data)
+
+    df.to_csv("../data/final/baseline.tsv", sep="\t")
+
+    train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
+    train_df.to_csv('../data/final/baseline_train.tsv', index=False, sep="\t")
+    test_df.to_csv('../data/final/baseline_test.tsv', index=False, sep="\t")
+
 

@@ -118,68 +118,6 @@ class OpenAIBatchRunner:
         self.log.info("Finished writing OpenAI file IDs locally")
 
 
-    # def submit_batch_jobs(self):
-    #     """
-    #     Submits a single batch job at a time based on file IDs recorded in `self.id_folder`/fileids.txt.
-    #     Waits for the status to complete before moving to the next job.
-    #     """
-    #     self.log.info("Submitting batch jobs one at a time...")
-    #     file_ids = []
-    #     with open(f"{self.id_folder}fileids.txt", mode="r") as f:
-    #         for data in f:
-    #             file_entry = data.split("\t")
-    #             file_ids.append((file_entry[0], file_entry[1].strip()))
-
-    #     self.log.info(f"Retrieved {len(file_ids)} file ids from local file")
-
-    #     FAILED_STATUS = ["failed", "expired", "cancelled"]
-    #     for file_id, file_name in file_ids:
-    #         # Submit the batch job
-    #         batch_job = self.client.batches.create(
-    #             input_file_id=file_id,
-    #             endpoint="/v1/chat/completions",
-    #             completion_window="24h",
-    #         )
-    #         batch_id = batch_job.id
-    #         self.log.info(f"Submitted job for file {file_name} with ID: {batch_id}")
-
-    #         # Wait for the job to complete or fail
-    #         while True:
-    #             job = self.client.batches.retrieve(batch_id)
-    #             if job.status in FAILED_STATUS:
-    #                 self.log.warning(
-    #                     f'    Batch with file {file_name} and ID "{batch_id}" has failed with status {job.status}'
-    #                 )
-    #                 self.log.info("    Now sleeping for 10 minutes to ensure that OpenAI's enqueued token count is reset correctly...")
-    #                 time.sleep(60*5)
-    #                 break
-    #             elif job.status == "completed":
-    #                 self.log.info(
-    #                     f"    Batch for file {file_name} completed! Downloading data..."
-    #                 )
-    #                 # Download the results
-    #                 result_file = self.client.files.content(job.output_file_id).content
-
-    #                 with open(f"{self.id_folder}output_fileids.txt", mode="a") as f:
-    #                     f.write(f"{job.output_file_id}\t{file_name}\n")
-
-    #                 with open(
-    #                     f"{self.batch_output_folder}output_{file_name}", mode="wb"
-    #                 ) as f:
-    #                     f.write(result_file)
-
-    #                 self.log.info(f"    Downloaded results for file {file_name}")
-    #                 self.log.info("    Now sleeping for 5 minutes to ensure that OpenAI's enqueued token count is reset correctly...")
-    #                 time.sleep(60*5)
-    #                 break
-
-    #             self.log.info(
-    #                 f"    Batch job {batch_id} for file {file_name} still in progress. Retrying in 5 minutes..."
-    #             )
-    #             time.sleep(60*5)
-
-    #     self.log.info("Finished submitting and processing all batch jobs.")
-
     def submit_batch_jobs(self):
         """
         Submits batch jobs based on file IDs recorded in `self.id_folder`/fileids.txt.
@@ -302,3 +240,30 @@ class OpenAIBatchRunner:
             time.sleep(2)
 
         self.log.info("Finished deleting files in OpenAI storage")
+
+    def get_data(self, file_prefix: str = "batch") -> dict:
+        """
+        Retrieve JSONL data and returns dictionary of data in the form {image_id: data}
+        Args:
+            batch_folder (str): Folder that stores output JSONL files
+            file_prefix (str): String that is before each `_{batch_num}.jsonl` file
+        """
+
+        all_file_names = [f for f in sorted(os.listdir(self.batch_output_folder)) if file_prefix in f]
+        result_data = {}
+        for file_name in all_file_names:
+            file_path = os.path.join(self.batch_output_folder, file_name)
+            with open(file_path, mode='r') as f:
+                for line in f:
+                    json_data = json.loads(line.rstrip())
+                    asin = "_".join(json_data["custom_id"].split("_")[1:]) # remove the "caption_" or "ocr_" prefix I added to custom_id                print(image_id)
+
+                    response = json_data["response"]
+                    if response["status_code"] != 200:
+                        print(f"Warning! {asin} did not return response code 200")
+
+                    output_content = response["body"]["choices"][0]["message"]["content"]
+                    result_data[asin] = output_content
+
+        return result_data
+
