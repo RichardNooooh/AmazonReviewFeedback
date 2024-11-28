@@ -77,7 +77,7 @@ class OpenAIBatchRunner:
             )
 
             for _, item in tqdm(df_batch.iterrows(), total=len(df_batch)):
-                batch_json["custom_id"] = f"asin_{item["ASIN"]}"
+                batch_json["custom_id"] = f"asin_{item['ASIN']}"
                 batch_json["body"]["messages"][1] = {
                     "role": "user",
                     "content": [{"type": "text", "text": item["Reviews"]}],
@@ -103,7 +103,7 @@ class OpenAIBatchRunner:
         openai_file_ids = []
         for batch_file_name in os.listdir(self.batch_input_folder):
             openai_file = self.client.files.create(
-                file=open(f"{self.batch_input_folder}{batch_file_name}", mode="rb"),
+                file=open(f"{self.batch_input_folder}/{batch_file_name}", mode="rb"),
                 purpose="batch",
             )
             openai_file_ids.append((openai_file.id, openai_file.filename))
@@ -111,7 +111,7 @@ class OpenAIBatchRunner:
             time.sleep(1)
 
         self.log.info(f"Finished uploading {len(openai_file_ids)} files")
-        with open(f"{self.id_folder}fileids.txt", mode="w") as f:
+        with open(f"{self.id_folder}/fileids.txt", mode="w") as f:
             for fileid, filename in openai_file_ids:
                 f.write(f"{fileid}\t{filename}\n")
 
@@ -125,7 +125,7 @@ class OpenAIBatchRunner:
         """
         self.log.info("Submitting batch jobs...")
         file_ids = []
-        with open(f"{self.id_folder}fileids.txt", mode="r") as f:
+        with open(f"{self.id_folder}/fileids.txt", mode="r") as f:
             for data in f:
                 file_entry = data.split("\t")
                 file_ids.append((file_entry[0], file_entry[1].strip()))
@@ -144,7 +144,7 @@ class OpenAIBatchRunner:
 
         self.log.info(f"Finished submitting {len(batch_ids)} jobs")
 
-        with open(f"{self.id_folder}batchids.txt", mode="w") as f:
+        with open(f"{self.id_folder}/batchids.txt", mode="w") as f:
             for batch_id, file_name in batch_ids:
                 f.write(f"{batch_id}\t{file_name}\n")
         self.log.info("Finished writing OpenAI file IDs locally")
@@ -157,7 +157,7 @@ class OpenAIBatchRunner:
         """
         self.log.info("Checking status for batch jobs...")
         batch_ids = []
-        with open(f"{self.id_folder}batchids.txt", mode="r") as f:
+        with open(f"{self.id_folder}/batchids.txt", mode="r") as f:
             for data in f:
                 file_entry = data.split("\t")
                 batch_ids.append((file_entry[0], file_entry[1].strip()))
@@ -165,7 +165,7 @@ class OpenAIBatchRunner:
         self.log.info(f"Retrieved {len(batch_ids)} batch IDs from local storage")
 
         # clear out the output_fileids.txt file
-        with open(f"{self.id_folder}output_fileids.txt", mode="w") as f:
+        with open(f"{self.id_folder}/output_fileids.txt", mode="w") as f:
             f.write("")
 
         FAILED_STATUS = ["failed", "expired", "cancelled"]
@@ -186,11 +186,11 @@ class OpenAIBatchRunner:
                     )
                     result_file = self.client.files.content(job.output_file_id).content
 
-                    with open(f"{self.id_folder}output_fileids.txt", mode="a") as f:
+                    with open(f"{self.id_folder}/output_fileids.txt", mode="a") as f:
                         f.write(f"{job.output_file_id}\t{file_name}\n")
 
                     with open(
-                        f"{self.batch_output_folder}output_{file_name}", mode="wb"
+                        f"{self.batch_output_folder}/output_{file_name}", mode="wb"
                     ) as f:
                         f.write(result_file)
 
@@ -223,11 +223,11 @@ class OpenAIBatchRunner:
         time.sleep(15)  # just in case you want to cancel
 
         file_ids = []
-        with open(f"{self.id_folder}fileids.txt", mode="r") as f:
+        with open(f"{self.id_folder}/fileids.txt", mode="r") as f:
             for data in f:
                 file_entry = data.split("\t")
                 file_ids.append((file_entry[0], file_entry[1].strip()))
-        with open(f"{self.id_folder}output_fileids.txt", mode="r") as f:
+        with open(f"{self.id_folder}/output_fileids.txt", mode="r") as f:
             for data in f:
                 file_entry = data.split("\t")
                 file_ids.append((file_entry[0], "output_" + file_entry[1].strip()))
