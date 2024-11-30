@@ -1,3 +1,5 @@
+
+
 import os
 import openai
 import json
@@ -43,11 +45,11 @@ class OpenAIBatchRunner:
 
     def create_jsonl_batches(self, batch_size: int = 500):
         """
-        Create JSONL batch files for sentiment analysis.
+        Create JSONL batch files for extracting keywords from reviews.
         Args:
             batch_size (int): Number of responses in each JSONL file.
         """
-        self.log.info("Creating JSONL batch files...")
+        self.log.info("Creating JSONL batch files for keywords...")
         with open(self.input_file, "r") as file:
             reviews_data = json.load(file)
 
@@ -86,16 +88,14 @@ class OpenAIBatchRunner:
                 batch_json["body"]["messages"][1] = {
                     "role": "user",
                     "content": (
-                        f"Review: \"{review['text']}\"\n\n"
-                        "Format the response as:\n"
+                        "You are a helpful assistant for analyzing Amazon reviews. Extract the most relevant keywords from "
+                        "the following review, focusing on terms that capture the product's features, benefits, or issues.\n\n"
+                        "Return the keywords as a JSON array in the following format:\n\n"
                         "{\n"
-                        "    \"Sentiment Data\": {\n"
-                        "        \"Happy\": <score>,\n"
-                        "        \"Sadness\": <score>,\n"
-                        "        \"Anger\": <score>,\n"
-                        "        \"Disgust\": <score>\n"
-                        "    }\n"
-                        "}"
+                        "    \"Keywords\": [\"<keyword1>\", \"<keyword2>\", \"<keyword3>\", ...]\n"
+                        "}\n\n"
+                        f"Review: \"{review['text']}\"\n\n"
+                        "Ensure the keywords are specific, concise, and relevant to the review content."
                     ),
                 }
                 batch_list.append(deepcopy(batch_json))
@@ -106,7 +106,7 @@ class OpenAIBatchRunner:
                 for request in batch_list:
                     batch_file.write(json.dumps(request) + "\n")
 
-        self.log.info(f"Finished writing all {num_batches} batches.")
+        self.log.info(f"Finished writing all {num_batches} batches for keywords.")
 
 
     def upload_batch_files(self):
