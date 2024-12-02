@@ -78,7 +78,7 @@ def get_top_reviewed_products(metadata_df, top_n=100, min_reviews=100):
     top_products_df = filtered_df.sort_values(by='rating_number', ascending=False).head(top_n)
     return top_products_df
 
-def fetch_reviews_for_top_products(review_df, top_asins, reviews_per_rating=5):
+def fetch_reviews_for_top_products(review_df, top_asins, reviews_per_rating=5, max_products=1000):
     """
     Fetch reviews grouped by ASIN and rating, and return them in a nested JSON format.
     """
@@ -102,7 +102,15 @@ def fetch_reviews_for_top_products(review_df, top_asins, reviews_per_rating=5):
 
     # Fetch up to 5 reviews per rating for each product
     nested_reviews = {}
+    count = 0
     for asin, ratings_dict in tqdm(product_reviews.items()):
+        if count == max_products:
+            break
+
+        # only want products with at least 1 review in each rating
+        if len(ratings_dict.keys()) < 5: 
+            continue
+
         temp = dict()
         # nested_reviews[asin] = {}
         temp["title"] = top_asins.set_index('asin').loc[asin, 'title']
@@ -116,10 +124,14 @@ def fetch_reviews_for_top_products(review_df, top_asins, reviews_per_rating=5):
             # Sort by helpful votes
             sorted_reviews = sorted(reviews, key=lambda x: (x.get('helpful_vote')), reverse=True)
             # Fetch the top 'reviews_per_rating' reviews for each star rating
-            temp["reviews"][star_rating] = sorted_reviews[:reviews_per_rating]
+            if reviews_per_rating > 1:
+                temp["reviews"][star_rating] = sorted_reviews[:reviews_per_rating]
+            else:
+                temp["reviews"][star_rating] = sorted_reviews[0]
         
         if is_valid:
             nested_reviews[asin] = temp
+            count += 1
     
     return nested_reviews
 
@@ -133,14 +145,15 @@ def main(metadata_file, review_file, output_name):
     review_df = load_reviews(review_file)
     print(f"Loaded {len(review_df)} reviews.")
     
-    # Get the top 10000 products by review count
+    # Get the top 1000 products by review count
     print("Selecting top reviewed products...")
     top_asins = get_top_reviewed_products(metadata_df, top_n=10000, min_reviews=50)
     print(f"Selected {len(top_asins)} top products.")
     
     # Fetch reviews for these top products and convert to nested JSON
     print("Fetching reviews for top products...")
-    nested_reviews = fetch_reviews_for_top_products(review_df, top_asins, reviews_per_rating=5)
+    nested_reviews = fetch_reviews_for_top_products(review_df, top_asins, reviews_per_rating=1, max_products=2000)
+    print(f"Final number of products that satisfy all filters: {len(nested_reviews.keys())}")
     
     # Save the nested JSON to a file
     print(f"Writing JSON output to {output_name}")
@@ -154,9 +167,9 @@ def main(metadata_file, review_file, output_name):
     gc.collect()
 
 if __name__ == "__main__":
-    data_folder = "./data/raw"
+    data_folder = "../data/raw"
     categories = ["Amazon_Fashion", "Appliances", "Electronics", "Handmade_Products", "Health_and_Household"]
     for category in categories:
         metadata_file = f"{data_folder}/meta_{category}.jsonl.gz"
         review_file = f"{data_folder}/{category}.jsonl.gz"
-        main(metadata_file, review_file, f"data/selected/{category}.json")
+        main(metadata_file, review_file, f"../data/selected/{category}.json")

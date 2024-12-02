@@ -1,10 +1,36 @@
 # Used to evaluate our model's outputs
-from keyword_batchapi_runner import OpenAIBatchRunner
+from batchapi_runner import OpenAIBatchRunner
 import logging
 import os
 from dotenv import load_dotenv
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from tqdm import tqdm
+
+# assumes the dataframe is in the format defined by `process_raw_data.py`
+def process_input_data(df: pd.DataFrame, processed_location: str) -> pd.DataFrame:
+    if df.shape[1] != 8:
+        print(f"Input dataframe does not have the correct number of columns (8). Received dataframe with {df.shape[1]} columns")
+    
+    new_df = []
+    for _, row in tqdm(df.iterrows(), total=len(df)):
+        # we want gpt-4o-mini data from each review
+        for n in range(1, 6):
+            review_title, review_text, helpful_votes = row[f"rating_{n}_review"].split(" ||| ")
+            new_df.append({
+                "id": f"{row["ASIN"]}_{n}", # Key: {asin}_{rating}
+                "user_input": f"{review_title}\n{review_text}"
+            })
+    
+    new_df = pd.DataFrame(new_df)
+    
+    # makes batches ~the same size since some reviews in certain categories are very long
+    new_df = new_df.sample(frac=1, random_state=42).reset_index(
+        drop=True
+    )
+
+    new_df.to_csv(processed_location, sep="\t", index=False)
+
+    return new_df
 
 
 if __name__ == "__main__":
@@ -29,39 +55,63 @@ if __name__ == "__main__":
     load_dotenv("./.env")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-    system_prompt = "You are a helpful assistant designed to analyze Amazon reviews. Your task is to extract concise and relevant keywords that represent the product's features, benefits, or issues from the provided text. Ensure the keywords are specific and focused on the review's content."
-
-    input_file = "../data/raw/cleaned_reviews.json"
-    batch_input_folder = "batch_input/"
-    batch_output_folder = "batch_output/"
-    id_folder = "ids/"
-    runner = OpenAIBatchRunner(OPENAI_API_KEY, system_prompt, input_file, batch_input_folder, batch_output_folder, id_folder)
-
-    runner.create_jsonl_batches()
+    system_prompt = "You are a helpful assistant designed to analyze Amazon "+\
+                    "reviews. Your task is to extract up to 10 concise keywords "+\
+                    "and phrases that represent the product's features, benefits, "+\
+                    "or issues from the provided text. Only include keywords directly "+\
+                    "found in the text."
+    
+    schema = {
+        "name": "get_keywords",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+            "problem_keywords": {
+                "type": "array",
+                "items": {
+                "type": "string"
+                },
+                "description": "Keywords identifying specific issues and features mentioned in the review."
+            }
+            },
+            "required": [
+            "problem_keywords"
+            ],
+            "additionalProperties": False
+        }
+    }
+    
+    input_file = "../data/processed/amazon_reviews.tsv"
+    processed_file_location = "../data/processed/formatted_reviews.tsv"
+    runner = OpenAIBatchRunner(OPENAI_API_KEY, system_prompt, json_schema=schema, input_file=input_file, batch_input_folder="./test/")
+    runner.create_jsonl_batches(process_input_data, processed_file_location, batch_size=2500)
     # runner.upload_batch_files()
     # runner.submit_batch_jobs()
     # runner.check_status_and_download()
     # runner.delete_data_files()
     # output_data = runner.get_data()
 
-    # # Load the original review data
-    # df = pd.read_csv(input_file, delimiter="\t")
-    # # Map the output data (reference + sentiment) to the corresponding reviews
-    # def append_sentiment_data(asin):
-    #     data = output_data.get(asin, {})
-    #     if not data:
-    #         return None
-    #     # Extract Actionable Feedback and Sentiment Data
-    #     return {
-    #         "Actionable Feedback": data.get("Actionable Feedback", "No feedback available"),
-    #         "Sentiment Data": data.get("Sentiment Data", {})
-    #     }
 
-#     # df['Reference'] = df['ASIN'].map(append_sentiment_data)
+    # reviews_groupings = dict()
+    # for key, keywords in output_data.items():
+    #     asin, rating = key.split("_")
+    #     if asin in reviews_groupings:
+    #         reviews_groupings.append({rating: keywords})
+    #     else:
+    #         reviews_groupings[asin] = [keywords]
 
-#     # # Save the updated dataframe to the final baseline file
-#     # df.to_csv("../data/final/baseline_with_sentiment.tsv", sep="\t", index=False)
+    # result = []
+    # for asin, review_list in reviews_groupings.items():
+    #     rating_columns = dict()
+    #     for n in range(1, 6):
+    #         keywords = review_list[str(n)]
+    #         rating_columns.update({f"rating_{str(n)}_keywords": keywords})
+            
+    #     result.append({
+    #             "ASIN": asin,
+    #             **rating_columns
+    #         })
+    # df = pd.DataFrame(result)
+    # df.to_csv("../data/processed/amazon_keywords.tsv", sep="\t")
 
-#     # train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
-#     # train_df.to_csv('../data/final/baseline_train.tsv', index=False, sep="\t")
-#     # test_df.to_csv('../data/final/baseline_test.tsv', index=False, sep="\t")

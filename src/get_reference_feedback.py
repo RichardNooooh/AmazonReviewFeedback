@@ -5,6 +5,42 @@ import os
 from dotenv import load_dotenv
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
+
+# assumes the dataframe is in the format defined by `process_raw_data.py`
+def process_input_data(df: pd.DataFrame, processed_location: str) -> pd.DataFrame:
+    if df.shape[1] != 8:
+        print(f"Input dataframe does not have the correct number of columns (8). Received dataframe with {df.shape[1]} columns")
+    
+    new_df = []
+    for _, row in tqdm(df.iterrows(), total=len(df)):
+        new_text = f"{row["item_title"]}\nAverage Rating: {row["avg_rating"]}\n\n"
+        
+        reviews = []
+        for n in range(1, 6):
+            # ignoring helpful_votes since that field seems to be bugged on CanopyAPI
+            review_title, review_text, helpful_votes = row[f"rating_{n}_review"].split(" ||| ")
+            review_formatted = f"{n}-star review:\n- Review Title: {review_title}" +\
+                                f"\n- Review Text: {review_text}"
+            reviews.append(review_formatted)
+
+        new_text += "\n\n".join(reviews)
+
+        new_df.append({
+            "id": row["ASIN"],
+            "user_input": new_text
+        })
+    
+    new_df = pd.DataFrame(new_df)
+    
+    # makes batches ~the same size since some reviews in certain categories are very long
+    new_df = new_df.sample(frac=1, random_state=42).reset_index(
+        drop=True
+    )
+
+    new_df.to_csv(processed_location, sep="\t", index=False)
+
+    return new_df
 
 
 if __name__ == "__main__":
@@ -30,46 +66,29 @@ if __name__ == "__main__":
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
     system_prompt = (
-       "You are a helpful assistant for a business. "
-        + "You are given a set of Amazon reviews for a given item, grouped by their ratings out of 5. "
-        + "For each review, you must: "
-        + "1) Provide a brief actionable feedback, and "
-        + "2) Analyze and return the sentiment of the review as a JSON object with fields: 'Happy', 'Joy', 'Anger', etc. "
-        + "3) Extract and return a list of the most relevant keywords from the review text that highlight the key points."
-        + "Format the response as: "
-        + "{  'Actionable Feedback': <feedback>, 'Sentiment Data': { 'Happy': <score>, 'Joy': <score>, 'Anger': <score>, ... }, 'Keywords': [<keyword1>, <keyword2>, ...]}"    )
-    
+        "You are a helpful assistant for a business. "
+        + "You are given a set of Amazon reviews for a given item, one for each rating out of 5, "
+        + "and tasked with providing actionable feedback to help improve this item. "
+        + "Please format your response into concise sentences, one for each actionable feedback. "
+        + "Place each feedback on a bulletpoint."
+    )
     input_file = "../data/processed/amazon_reviews.tsv"
-    
-    batch_input_folder = "../data/batch_temp/batch_input"
-    batch_output_folder = "../data/batch_temp/batch_output"
-    id_folder = "../data/batch_temp/ids"
-    runner = OpenAIBatchRunner(OPENAI_API_KEY, system_prompt, input_file, batch_input_folder, batch_output_folder, id_folder)
-    runner.create_jsonl_batches()
-    runner.upload_batch_files()
-    runner.submit_batch_jobs()
-    runner.check_status_and_download()
-    runner.delete_data_files()
+    processed_file_location = "../data/processed/formatted_baseline.tsv"
+    runner = OpenAIBatchRunner(OPENAI_API_KEY, system_prompt, input_file=input_file)
+    # runner.create_jsonl_batches(process_input_data, processed_file_location)
+    # runner.upload_batch_files()
+    # runner.submit_batch_jobs()
+    # runner.check_status_and_download()
+    # runner.delete_data_files()
     output_data = runner.get_data()
 
-    # # Load the original review data
-    # df = pd.read_csv(input_file, delimiter="\t")
-    # # Map the output data (reference + sentiment) to the corresponding reviews
-    # def append_sentiment_data(asin):
-    #     data = output_data.get(asin, {})
-    #     if not data:
-    #         return None
-    #     # Extract Actionable Feedback and Sentiment Data
-    #     return {
-    #         "Actionable Feedback": data.get("Actionable Feedback", "No feedback available"),
-    #         "Sentiment Data": data.get("Sentiment Data", {})
-    #     }
+    df = pd.read_csv(processed_file_location, delimiter="\t", index_col=False)
+    df['reference'] = df['id'].map(output_data)
 
-#     # df['Reference'] = df['ASIN'].map(append_sentiment_data)
+    # for finetuning baseline data
+    df.to_csv("../data/final/baseline.tsv", sep="\t", index=False)
 
-#     # # Save the updated dataframe to the final baseline file
-#     # df.to_csv("../data/final/baseline_with_sentiment.tsv", sep="\t", index=False)
+    train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
+    train_df.to_csv('../data/final/baseline_train.tsv', index=False, sep="\t")
+    test_df.to_csv('../data/final/baseline_test.tsv', index=False, sep="\t")
 
-#     # train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
-#     # train_df.to_csv('../data/final/baseline_train.tsv', index=False, sep="\t")
-#     # test_df.to_csv('../data/final/baseline_test.tsv', index=False, sep="\t")

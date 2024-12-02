@@ -5,7 +5,6 @@ import logging
 from copy import deepcopy
 import time
 import pandas as pd
-from tqdm import tqdm
 
 
 class OpenAIBatchRunner:
@@ -13,7 +12,8 @@ class OpenAIBatchRunner:
         self,
         openai_api_key: str,
         system_prompt: str,
-        input_file: str,
+        json_schema: dict | None = None,
+        input_file: str = None,
         batch_input_folder: str = "../data/batch_temp/batch_input/",
         batch_output_folder: str = "../data/batch_temp/batch_output/",
         id_folder: str = "../data/batch_temp/ids/",
@@ -36,28 +36,61 @@ class OpenAIBatchRunner:
 
         self.log = logging.getLogger(__name__)
 
-        self.base_json = {
-            "custom_id": None,
-            "method": "POST",
-            "url": "/v1/chat/completions",
-            "body": {"model": "gpt-4o-mini", "messages": None, "max_tokens": 1024},
-        }
+        self.schema = None
+        if json_schema:
+            self.log.info("Utilizing structured output JSON Schema")
+            self.schema = json_schema
+            self.base_json = {
+                "custom_id": None,
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {
+                    "model": "gpt-4o-mini",
+                    "messages": None,
+                    "max_tokens": 1024,
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": json_schema,
+                    },
+                },
+            }
+        else:
+            self.base_json = {
+                "custom_id": None,
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {"model": "gpt-4o-mini", "messages": None, "max_tokens": 1024},
+            }
 
         self.system_prompt = {
             "role": "system",
             "content": system_prompt,
         }
 
-    def create_jsonl_batches(self, batch_size: int = 500):
+    def create_jsonl_batches(
+        self,
+        processing_function: None,
+        processed_file_location: str = None,
+        batch_size: int = 500,
+    ):
         """
-        Create JSONL batch files.
+        Create JSONL batch files. Expects either an input file with columns "id" and "user_input", or
+        an arbitrary data file with the appropriate processing function to produce a dataframe with "id"
+        and "user_input" columns.
 
         Args:
             batch_size (int): Number of responses in each JSONL file.
         """
         self.log.info("Creating JSONL batch files")
-        df = pd.read_csv(self.input_file, delimiter="\t")
-        df = df.sample(frac=1, random_state=42).reset_index(drop=True) # makes batches ~the same size
+        df = pd.read_csv(self.input_file, delimiter="\t", index_col=False)
+
+        if processing_function:
+            self.log.info("Processing input data using processing function...")
+            df = processing_function(df, processed_file_location)
+
+        if df.shape[1] != 2:
+            self.log.error("Input dataframe must have 2 columns.")
+            exit(1)
 
         num_batches = df.shape[0] // batch_size + (
             1 if df.shape[0] % batch_size != 0 else 0
@@ -76,11 +109,11 @@ class OpenAIBatchRunner:
                 f"Creating batch {batch_num} from {start_idx} to {start_idx + df_batch.shape[0] - 1}, inclusive"
             )
 
-            for _, item in tqdm(df_batch.iterrows(), total=len(df_batch)):
-                batch_json["custom_id"] = f"asin_{item['ASIN']}"
+            for _, item in df_batch.iterrows():
+                batch_json["custom_id"] = item["id"]
                 batch_json["body"]["messages"][1] = {
                     "role": "user",
-                    "content": [{"type": "text", "text": item["Reviews"]}],
+                    "content": [{"type": "text", "text": item["user_input"]}],
                 }
                 batch_list.append(deepcopy(batch_json))
 
@@ -116,7 +149,6 @@ class OpenAIBatchRunner:
                 f.write(f"{fileid}\t{filename}\n")
 
         self.log.info("Finished writing OpenAI file IDs locally")
-
 
     def submit_batch_jobs(self):
         """
@@ -212,7 +244,6 @@ class OpenAIBatchRunner:
 
         self.log.info("Finished retrieving data!")
 
-
     def delete_data_files(self):
         """
         Using the file_ids and batch_ids stored locally, delete them from OpenAI's file storage.
@@ -249,21 +280,22 @@ class OpenAIBatchRunner:
             file_prefix (str): String that is before each `_{batch_num}.jsonl` file
         """
 
-        all_file_names = [f for f in sorted(os.listdir(self.batch_output_folder)) if file_prefix in f]
+        all_file_names = [
+            f for f in sorted(os.listdir(self.batch_output_folder)) if file_prefix in f
+        ]
         result_data = {}
         for file_name in all_file_names:
             file_path = os.path.join(self.batch_output_folder, file_name)
-            with open(file_path, mode='r') as f:
+            with open(file_path, mode="r") as f:
                 for line in f:
                     json_data = json.loads(line.rstrip())
-                    asin = "_".join(json_data["custom_id"].split("_")[1:]) # remove the "caption_" or "ocr_" prefix I added to custom_id                print(image_id)
-
+                    obj_id = json_data["custom_id"]
                     response = json_data["response"]
                     if response["status_code"] != 200:
-                        print(f"Warning! {asin} did not return response code 200")
+                        print(f"Warning! {obj_id} did not return response code 200")
 
-                    output_content = response["body"]["choices"][0]["message"]["content"]
-                    result_data[asin] = output_content
+                    choice = response["body"]["choices"][0]
+                    output_content = choice["message"]["content"]
+                    result_data[obj_id] = output_content
 
         return result_data
-
