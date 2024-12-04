@@ -5,6 +5,7 @@ import os
 from dotenv import load_dotenv
 import pandas as pd
 from tqdm import tqdm
+import json
 
 # assumes the dataframe is in the format defined by `process_raw_data.py`
 def process_input_data(df: pd.DataFrame, processed_location: str) -> pd.DataFrame:
@@ -32,6 +33,32 @@ def process_input_data(df: pd.DataFrame, processed_location: str) -> pd.DataFram
 
     return new_df
 
+def process_output_data(output_data: dict):
+    reviews_groupings = dict()
+    for key, keywords_string in output_data.items():
+        asin, rating = key.split("_")
+        # keep first 5 phrases
+        keywords = json.loads(keywords_string)["problem_keywords"][:5]
+        keywords = ",".join(keywords)
+        if asin in reviews_groupings:
+            reviews_groupings[asin][rating] = keywords
+        else:
+            reviews_groupings[asin] = {rating: keywords}
+
+    result = []
+    for asin, review_list in reviews_groupings.items():
+        rating_columns = dict()
+        for n in range(1, 6):
+            keywords = review_list[str(n)]
+            rating_columns.update({f"rating_{str(n)}_keywords": keywords})
+            
+        result.append({
+                "ASIN": asin,
+                **rating_columns
+            })
+    df = pd.DataFrame(result)
+    df.to_csv("../data/processed/amazon_keywords.tsv", sep="\t", index=False)
+
 
 if __name__ == "__main__":
     fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
@@ -39,7 +66,7 @@ if __name__ == "__main__":
     if not os.path.exists("../logs/"):
         os.makedirs("../logs/")
 
-    file_handler = logging.FileHandler("../logs/batchrunner.log", mode="w")
+    file_handler = logging.FileHandler("../logs/batchrunner_keywords.log", mode="w")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(fmt)
 
@@ -84,34 +111,16 @@ if __name__ == "__main__":
     
     input_file = "../data/processed/amazon_reviews.tsv"
     processed_file_location = "../data/processed/formatted_reviews.tsv"
-    runner = OpenAIBatchRunner(OPENAI_API_KEY, system_prompt, json_schema=schema, input_file=input_file, batch_input_folder="./test/")
-    runner.create_jsonl_batches(process_input_data, processed_file_location, batch_size=2500)
+    runner = OpenAIBatchRunner(OPENAI_API_KEY, system_prompt, json_schema=schema, input_file=input_file,
+                               batch_input_folder="../data/batch_keywords/batch_input/",
+                               batch_output_folder="../data/batch_keywords/batch_output/",
+                               id_folder="../data/batch_keywords/ids/")
+    # runner.create_jsonl_batches(process_input_data, processed_file_location, batch_size=2500)
     # runner.upload_batch_files()
     # runner.submit_batch_jobs()
     # runner.check_status_and_download()
     # runner.delete_data_files()
-    # output_data = runner.get_data()
 
-
-    # reviews_groupings = dict()
-    # for key, keywords in output_data.items():
-    #     asin, rating = key.split("_")
-    #     if asin in reviews_groupings:
-    #         reviews_groupings.append({rating: keywords})
-    #     else:
-    #         reviews_groupings[asin] = [keywords]
-
-    # result = []
-    # for asin, review_list in reviews_groupings.items():
-    #     rating_columns = dict()
-    #     for n in range(1, 6):
-    #         keywords = review_list[str(n)]
-    #         rating_columns.update({f"rating_{str(n)}_keywords": keywords})
-            
-    #     result.append({
-    #             "ASIN": asin,
-    #             **rating_columns
-    #         })
-    # df = pd.DataFrame(result)
-    # df.to_csv("../data/processed/amazon_keywords.tsv", sep="\t")
+    output_data = runner.get_data()
+    process_output_data(output_data)
 

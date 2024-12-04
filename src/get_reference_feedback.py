@@ -4,7 +4,6 @@ import logging
 import os
 from dotenv import load_dotenv
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 # assumes the dataframe is in the format defined by `process_raw_data.py`
@@ -41,6 +40,10 @@ def process_input_data(df: pd.DataFrame, processed_location: str) -> pd.DataFram
     new_df.to_csv(processed_location, sep="\t", index=False)
 
     return new_df
+
+def process_output_data(output_data: dict):
+    df = pd.DataFrame(output_data)
+    df.to_csv("../data/processed/amazon_references.tsv", sep="\t", index=False)
 
 
 if __name__ == "__main__":
@@ -80,15 +83,6 @@ if __name__ == "__main__":
     # runner.submit_batch_jobs()
     # runner.check_status_and_download()
     # runner.delete_data_files()
-    output_data = runner.get_data()
-
-    df = pd.read_csv(processed_file_location, delimiter="\t", index_col=False)
-    df['reference'] = df['id'].map(output_data)
-
-    # for finetuning baseline data
-    df.to_csv("../data/final/baseline.tsv", sep="\t", index=False)
-
-    train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
-    train_df.to_csv('../data/final/baseline_train.tsv', index=False, sep="\t")
-    test_df.to_csv('../data/final/baseline_test.tsv', index=False, sep="\t")
-
+    
+    # output_data = runner.get_data()
+    # process_output_data(output_data)
