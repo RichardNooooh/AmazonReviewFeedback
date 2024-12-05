@@ -4,12 +4,12 @@ from openai_api_calls import analyze_review_sentiment, extract_review_keywords
 import gradio as gr
 from openai_api_calls import analyze_review_sentiment, extract_review_keywords
 
-def process_feedback(title, review1, review2, review3, review4, review5):
+def process_feedback(title, review1title, review1, review2title, review2, review3title, review3, review4title, review4, review5title, review5):
     """
     Process feedback by analyzing reviews for sentiment and keywords.
     """
     combined_feedback = f"Item Title: {title}\n\n"
-    reviews = [review1, review2, review3, review4, review5]
+    reviews = [review1title, review1, review2title, review2, review3title, review3, review4title, review4, review5title, review5]
 
     for i, review in enumerate(reviews, start=1):
         if review.strip():
@@ -49,10 +49,16 @@ interface = gr.Interface(
     fn=process_feedback,
     inputs=[
         gr.Textbox(label="Amazon Item Title", placeholder="Enter the Amazon item title here"),
+        gr.Textbox(label="Average Review", placeholder="Enter the average star rating here", lines=1),
+        gr.Textbox(label="Review Title 1", placeholder="Enter review 1 title here", lines=1),
         gr.Textbox(label="Review 1", placeholder="Enter review 1 text here", lines=3),
+        gr.Textbox(label="Review Title 2", placeholder="Enter review 2 title here", lines=1),
         gr.Textbox(label="Review 2", placeholder="Enter review 2 text here", lines=3),
+        gr.Textbox(label="Review Title 3", placeholder="Enter review 3 title here", lines=1),
         gr.Textbox(label="Review 3", placeholder="Enter review 3 text here", lines=3),
+        gr.Textbox(label="Review Title 4", placeholder="Enter review 4 title here", lines=1),
         gr.Textbox(label="Review 4", placeholder="Enter review 4 text here", lines=3),
+        gr.Textbox(label="Review Title 5", placeholder="Enter review 5 title here", lines=1),
         gr.Textbox(label="Review 5", placeholder="Enter review 5 text here", lines=3),
     ],
     outputs=gr.Textbox(label="Generated Feedback", lines=20),
